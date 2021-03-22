@@ -36,6 +36,17 @@ class Node:
             self.weights[j] = self.weights[j] + step * delta * data[j]
 
 
+def generate_weights(n):
+    node_weights = []
+
+    for w in range(n):
+        # Weights of all predictors in a node
+        # [0, 1)
+        node_weights.append(np.random.uniform(0, 1))
+
+    return node_weights
+
+
 # Data standardisation functions
 
 
@@ -110,6 +121,7 @@ def back_propagation(df, nodes, step, epochs):
             predictand = row[-1]
             data = row[:-1]
             hidden_out = []
+
             # forward pass
             for node in nodes:
                 output = node.out(data=data)
@@ -211,7 +223,6 @@ if __name__ == '__main__':
 
         preprocessed = std_methods.get(args.standard, "none")  # used to derive the partitions
         preprocessed.to_csv(args.data+".preprocessed.csv", index=False)
-        # exit()
 
         # Partitioning data
         array_len = len(preprocessed)
@@ -221,26 +232,18 @@ if __name__ == '__main__':
         unseen_set = validation_set.tail(int(len(validation_set / 2)))
 
         # Initial weights
-        # ! Refactor possibly needed
         nodes = []
-        for i in range(args.nodes + 1):
-            node_weights = []
+        for i in range(args.nodes):
+            nodes.append(Node(weights=generate_weights(len(preprocessed.columns))))
 
-            for c in range(len(preprocessed.columns)):
-                # Weights of all predictors in a node
-                # [0, 1)
-                node_weights.append(np.random.uniform(0, 1))
+        output_node = Node(weights=generate_weights(args.nodes + 1))
 
-            nodes.append(Node(weights=node_weights))
-
-        output_node = nodes[-1]     # TODO: Fix weights being tied to the number of columns
-        output_node.weights = output_node.weights[:args.nodes]
-        nodes = nodes[:-1]
-        print(len(output_node.weights), args.nodes)
         # Train a model
 
         back_propagation(training_set, nodes, args.step, args.epochs)
         pd.DataFrame(error_list).to_csv(args.data + ".error.csv", index=False)
+
+        # TODO: Add backprop improvements
 
         # TODO: Validate Model
 
