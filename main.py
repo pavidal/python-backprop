@@ -120,22 +120,19 @@ def back_propagation(df, nodes, step, epochs):
         for row in df.to_numpy():
             predictand = row[-1]
             data = row[:-1]
-            hidden_out = []
 
-            # forward pass
-            for node in nodes:
-                output = node.out(data=data)
-                hidden_out.append(output)
+            fp = forward_pass(data, nodes)
+            uo = fp.get("uo")
+            hidden_out = fp.get("hidden")
 
-            # Updating weights
-
-            # Output Node
-            uo = output_node.out(data=hidden_out)
             if np.isnan(uo) or np.isinf(uo):
                 raise RuntimeError("Float Overflow")
-            delta_o = (predictand - uo) * (uo * (1 - uo))
-            d = delta_o
 
+            # Backward Pass
+            delta_o = (predictand - uo) * (uo * (1 - uo))
+            d = delta_o     # for logging error in each
+
+            # Updating weights
             output_node.adjust_weights(delta=delta_o, step=step, data=hidden_out)
 
             # hidden nodes
@@ -145,6 +142,20 @@ def back_propagation(df, nodes, step, epochs):
                 node.adjust_weights(delta=delta_j, step=step, data=data)
 
         error_list.append(d)
+
+
+def forward_pass(data, nodes):
+    hidden_out = []
+
+    # forward pass
+    for node in nodes:
+        output = node.out(data=data)
+        hidden_out.append(output)
+
+    # Output Node
+    uo = output_node.out(data=hidden_out)
+
+    return {"uo": uo, "hidden": hidden_out}
 
 
 # I/O functions
@@ -245,7 +256,22 @@ if __name__ == '__main__':
 
         # TODO: Add backprop improvements
 
-        # TODO: Validate Model
+        # Validate Model
+
+        del error_list[:]
+
+        for row in validation_set.to_numpy():
+            predictand = row[-1]
+            data = row[:-1]
+
+            fp = forward_pass(data=data, nodes=nodes)
+            uo = fp.get("uo")
+            # hidden = fp.get("hidden")
+
+            delta_o = (predictand - uo) * (uo * (1 - uo))
+            error_list.append(delta_o)
+
+        pd.DataFrame(error_list).to_csv(args.data + ".validate.csv", index=False)
 
         # TODO: Test model on unseen data
 
