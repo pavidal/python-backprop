@@ -5,6 +5,7 @@ import pandas as pd
 
 class Node:
     def __init__(self, weights):
+        self.delta_w = np.full(len(weights), 0.0)
         self.bias = weights[-1]
         self.weights = weights[:-1]
         self.output = None
@@ -32,8 +33,14 @@ class Node:
         return predictand - output
 
     def adjust_weights(self, delta, data, step):
+        new_bias = self.bias + step * delta + args.momentum * self.delta_w[-1]
+        self.delta_w[-1] = new_bias - self.bias
+        self.bias = new_bias
+
         for j in range(len(self.weights)):
-            self.weights[j] = self.weights[j] + step * delta * data[j]
+            new_weight = self.weights[j] + step * delta * data[j] + args.momentum * self.delta_w[j]
+            self.delta_w[j] = new_weight - self.weights[j]
+            self.weights[j] = new_weight
 
 
 def generate_weights(n):
@@ -63,6 +70,12 @@ def standardise_minmax(dataframe, limit):
     data = dataframe.copy()
 
     for col in data.columns:
+        if col == data.columns[-1]:
+            preprocess_values.update({
+                "min": data[col].min(),
+                "max": data[col].max()
+            })
+
         # standardise data to [0, 1]
         data[col] = (data[col] - data[col].min()) / (data[col].max() - data[col].min())
 
@@ -85,6 +98,11 @@ def standardise_square(dataframe):
     data = dataframe.copy()
 
     for col in data.columns:
+        if col == data.columns[-1]:
+            preprocess_values.update({
+                "square": ((data[col] ** 2).sum()) ** (1 / 2)
+            })
+
         data[col] = data[col] / ((data[col] ** 2).sum()) ** (1 / 2)
 
     return data
@@ -102,17 +120,59 @@ def standardise_stddev(dataframe):
     data = dataframe.copy()
 
     for col in data.columns:
+        if col == data.columns[-1]:
+            preprocess_values.update({
+                "stddev": data[col].std(),
+                "mean": data[col].mean()
+            })
+
         data[col] = (data[col] - data[col].mean()) / data[col].std()
 
     return data
 
 
+def destandardise_square(array):
+    data = []
+
+    square = preprocess_values.get("square")
+
+    for r in array:
+        data.append(square * r)
+
+    return pd.DataFrame(data)
+
+
+def destandardise_minmax(array, limit):
+    data = []
+
+    min = preprocess_values.get("min")
+    max = preprocess_values.get("max")
+
+    for r in array:
+        x = r
+        if limit:
+            x = (r - 0.1) / 0.8
+
+        data.append((x * (max - min)) + min)
+
+    return pd.DataFrame(data)
+
+
+def destandardise_stddev(array):
+    data = []
+
+    stddev = preprocess_values.get("stddev")
+    mean = preprocess_values.get("mean")
+
+    for r in array:
+        data.append((r * stddev) + mean)
+
+    return pd.DataFrame(data)
+
 # Back Propagation
 
 
 def back_propagation(df, nodes, step, epochs):
-    # TODO: Split into forward and backward functions
-
     for epoch in range(epochs):
         print(epoch + 1, "of", epochs)
         d = 0
@@ -141,7 +201,7 @@ def back_propagation(df, nodes, step, epochs):
                 delta_j = output_node.weights[n] * delta_o * (node.output * (1 - node.output))
                 node.adjust_weights(delta=delta_j, step=step, data=data)
 
-        error_list.append(d)
+        error_list.append(np.absolute(d))
 
 
 def forward_pass(data, nodes):
@@ -209,15 +269,21 @@ if __name__ == '__main__':
                         type=int, default=5)
     parser.add_argument("-p", "--step", help=" (default = 0.01)", metavar="<STEP>",
                         type=float, default=0.01)
+    parser.add_argument("-m", "--momentum", help=" (default = 0.0)", metavar="<MOMENTUM>",
+                        type=float, default=0.0)
     # parser.add_argument("-p", "--predictand", help="column to use as result, -1 = auto", metavar="<COLUMN>", type=int,
     #                     default=-1)
 
     # TODO: Refactor into an init() function
 
     args = parser.parse_args()
+
     error_list = []
+
     try:
         raw_data = get_data(args.data)
+
+        preprocess_values = {}
 
         # Pre-processing data
         std_methods = {
@@ -258,7 +324,7 @@ if __name__ == '__main__':
 
         # Validate Model
 
-        del error_list[:]
+        results = []
 
         for row in validation_set.to_numpy():
             predictand = row[-1]
@@ -266,12 +332,25 @@ if __name__ == '__main__':
 
             fp = forward_pass(data=data, nodes=nodes)
             uo = fp.get("uo")
-            # hidden = fp.get("hidden")
 
             delta_o = (predictand - uo) * (uo * (1 - uo))
-            error_list.append(delta_o)
+            results.append(uo)
 
-        pd.DataFrame(error_list).to_csv(args.data + ".validate.csv", index=False)
+        reverse_std = {
+            "none": pd.DataFrame(results),
+            "minmax": destandardise_minmax(results, False),
+            "minmax90": destandardise_minmax(results, True),
+            "square": destandardise_square(results),
+            "stddev": destandardise_stddev(results)
+        }
+
+        prediction = reverse_std.get(args.standard)
+        prediction.columns = ["Prediction"]
+
+        real_values = raw_data.tail(int(array_len * 0.4)).loc[:, [preprocessed.columns[-1]]]
+
+        results = pd.concat([real_values, prediction], axis=1)
+        results.to_csv(args.data + ".validate.csv", index=False)
 
         # TODO: Test model on unseen data
 
